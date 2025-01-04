@@ -30,34 +30,44 @@ def get_chunk(lst, n, k):
 # Custom dataset class
 class CustomDataset(Dataset):
     def __init__(self, questions, image_folder, tokenizer, image_processor, model_config):
-        self.questions = questions
-        self.image_folder = image_folder
-        self.tokenizer = tokenizer
-        self.image_processor = image_processor
-        self.model_config = model_config
+        # 初始化自定义数据集类
+        self.questions = questions  # 问题列表
+        self.image_folder = image_folder  # 图像文件夹路径
+        self.tokenizer = tokenizer  # 分词器
+        self.image_processor = image_processor  # 图像处理器
+        self.model_config = model_config  # 模型配置
 
     def __getitem__(self, index):
-        line = self.questions[index]
-        image_file = line["image"]
-        qs = line["text"]
+        # 获取指定索引处的数据项
+        line = self.questions[index]  # 获取问题行
+        image_file = line["image"]  # 获取图像文件名
+        qs = ""  # 获取问题文本
         if self.model_config.mm_use_im_start_end:
+            # 如果模型配置使用图像起始和结束标记
             qs = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + qs
         else:
+            # 否则只使用图像标记
             qs = DEFAULT_IMAGE_TOKEN + '\n' + qs
 
+        # 获取对话模板并添加消息
         conv = conv_templates[args.conv_mode].copy()
         conv.append_message(conv.roles[0], qs)
         conv.append_message(conv.roles[1], None)
-        prompt = conv.get_prompt()
+        prompt = conv.get_prompt()  # 获取提示文本
 
+        # 打开图像并转换为RGB格式
         image = Image.open(os.path.join(self.image_folder, image_file)).convert('RGB')
+        # 处理图像并转换为张量
         image_tensor = process_images([image], self.image_processor, self.model_config)[0]
 
+        # 将提示文本转换为输入ID
         input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt')
 
+        # 返回输入ID、图像张量和图像尺寸
         return input_ids, image_tensor, image.size
 
     def __len__(self):
+        # 返回数据集的长度
         return len(self.questions)
 
 
@@ -89,60 +99,56 @@ def eval_model(args):
     declarative_questions = [json.loads(q) for q in open(os.path.expanduser(args.declarative_question_file), "r")]
     # 获取指定的块
     declarative_questions = get_chunk(declarative_questions, args.num_chunks, args.chunk_idx)
-    # 展开答案文件路径
-    representations_file = os.path.expanduser(args.representations_file)
-    # 创建答案文件目录
-    os.makedirs(os.path.dirname(representations_file), exist_ok=True)
-    # 打开答案文件
-    rep_file = open(representations_file, "w")
-
-    # 如果是plain模型且未微调且不使用mmtag提示
-    if 'plain' in model_name and 'finetune' not in model_name.lower() and 'mmtag' not in args.conv_mode:
-        # 自动切换到mmtag提示
-        args.conv_mode = args.conv_mode + '_mmtag'
-        print(f'It seems that this is a plain model, but it is not using a mmtag prompt, auto switching to {args.conv_mode}.')
 
     # 创建数据加载器
     data_loader = create_data_loader(declarative_questions, args.image_folder, tokenizer, image_processor, model.config)
 
-    # 遍历数据加载器和问题
-    for (input_ids, image_tensor, image_sizes), line in tqdm(zip(data_loader, declarative_questions), total=len(declarative_questions)):
-        # 获取问题ID
-        idx = line["question_id"]
-        # 获取当前提示
-        cur_prompt = line["text"]
+    # 展开答案文件路径
+    representations_file = os.path.expanduser(args.representations_file)
+    # 创建答案文件目录
+    os.makedirs(os.path.dirname(representations_file), exist_ok=True)
 
-        # 将输入ID移动到CUDA设备
-        input_ids = input_ids.to(device='cuda', non_blocking=True)
+    # 创建一个空的 .pt 文件，准备存储流式写入的数据
+    with open(representations_file, 'wb') as f:
+        # 遍历数据加载器和问题
+        for (input_ids, image_tensor, image_sizes), line in tqdm(zip(data_loader, declarative_questions), total=len(declarative_questions)):
+            # 获取问题ID
+            idx = line["question_id"]
 
-        # 推理模式
-        with torch.inference_mode():
-            # 生成输出ID
-            output_ids = model.generate(
-                input_ids,
-                images=image_tensor.to(dtype=torch.float16, device='cuda', non_blocking=True),
-                image_sizes=image_sizes,
-                do_sample=True if args.temperature > 0 else False,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                num_beams=args.num_beams,
-                max_new_tokens=args.max_new_tokens,
-                use_cache=True)
+            # 推理模式
+            with torch.inference_mode():
+                # 获取 multimodal encoder 的 image 的 representation
+                images = image_tensor.to(dtype=torch.float16, device='cuda', non_blocking=True)
 
-        # 解码输出
-        outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+            image_features, pro_image_features = model.encode_images_steps(images)
 
-        # 生成答案ID
-        ans_id = shortuuid.uuid()
-        # 写入答案文件
-        rep_file.write(json.dumps({"question_id": idx,
-                                   "prompt": cur_prompt,
-                                   "text": outputs,
-                                   "answer_id": ans_id,
-                                   "model_id": model_name,
-                                   "metadata": {}}) + "\n")
-    # 关闭答案文件
-    rep_file.close()
+            # 构建每组数据的字典
+            data = {
+                'question_id': idx,
+                'image_features': image_features,
+                'pro_image_features': pro_image_features,
+                'model_id': model_name
+            }
+
+            # 将每组数据逐条保存
+            torch.save(data, f)
+            f.flush()  # 强制刷新缓存，以便及时写入磁盘
+
+    # 读取保存的 .pt 文件并验证
+    loaded_data_list = []
+    with open(representations_file, 'rb') as f:
+        while True:
+            try:
+                # 逐个读取每个数据字典
+                data = torch.load(f)
+                loaded_data_list.append(data)
+            except EOFError:
+                break
+
+    # 打印读取的数据
+    for idx, data in enumerate(loaded_data_list):
+        print(f"Data {idx}:")
+        print(data.keys())
 
 # Suppress warnings
 import warnings
@@ -154,7 +160,7 @@ if __name__ == "__main__":
     parser.add_argument("--model-base", type=str, default=None)
     parser.add_argument("--image-folder", type=str, default="")
     parser.add_argument("--declarative-question-file", type=str, default="tables/question.jsonl")
-    parser.add_argument("--representations-file", type=str, default="representations.jsonl")
+    parser.add_argument("--representations-file", type=str, default="representations.pt")
     parser.add_argument("--conv-mode", type=str, default="llava_v1")
     parser.add_argument("--num-chunks", type=int, default=1)
     parser.add_argument("--chunk-idx", type=int, default=0)
