@@ -71,10 +71,7 @@ class CLIPVisionTower(nn.Module):
             if output_decoder_attentions:
                 attentions = image_forward_outs.attentions
 
-        if output_decoder_attentions:
-            return image_features, attentions
-        else:
-            return image_features
+        return image_features, attentions
 
     @property
     def dummy_feature(self):
