@@ -328,9 +328,9 @@ class LlavaMetaForCausalLM(ABC):
             position_ids = None
 
         if output_decoder_attentions:
-            return new_input_embeds, position_ids, attention_mask, past_key_values, new_labels, attentions
+            return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, attentions
         else:
-            return new_input_embeds, position_ids, attention_mask, past_key_values, new_labels
+            return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels
 
     def initialize_vision_tokenizer(self, model_args, tokenizer):
         if model_args.mm_use_im_patch_token:
