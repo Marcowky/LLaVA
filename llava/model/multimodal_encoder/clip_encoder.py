@@ -43,32 +43,37 @@ class CLIPVisionTower(nn.Module):
         return image_features
 
     # 记录梯度
-    # @torch.no_grad()
-    def forward(self, images, output_decoder_attentions=False):
-        if output_decoder_attentions:
-            if type(images) is list:
-                image_features = []
-                attentions = []
-                for image in images:
-                    image_forward_out = self.vision_tower(image.to(device=self.device, dtype=self.dtype).unsqueeze(0), output_hidden_states=True, output_attentions=True)
-                    image_feature = self.feature_select(image_forward_out).to(image.dtype)
-                    image_features.append(image_feature)
+    def forward(self, images, output_decoder_attentions=False, with_decoder_grad=False):
+        # 选择是否禁用梯度计算
+        if not with_decoder_grad:
+            with torch.no_grad():
+                return self._process_images(images, output_decoder_attentions)
+        else:
+            return self._process_images(images, output_decoder_attentions)
+
+    def _process_images(self, images, output_decoder_attentions):
+        image_features = []
+        attentions = []
+
+        # 确保 images 是列表或单个张量的处理
+        if isinstance(images, list):
+            for image in images:
+                image_forward_out = self.vision_tower(image.to(device=self.device, dtype=self.dtype).unsqueeze(0),
+                                                    output_hidden_states=True, output_attentions=output_decoder_attentions)
+                image_feature = self.feature_select(image_forward_out).to(image.dtype)
+                image_features.append(image_feature)
+                if output_decoder_attentions:
                     attentions.append(image_forward_out.attentions)
-            else:
-                image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype), output_hidden_states=True, output_attentions=True)
-                image_features = self.feature_select(image_forward_outs).to(images.dtype)
+        else:
+            image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype),
+                                                output_hidden_states=True, output_attentions=output_decoder_attentions)
+            image_features = self.feature_select(image_forward_outs).to(images.dtype)
+            if output_decoder_attentions:
                 attentions = image_forward_outs.attentions
+
+        if output_decoder_attentions:
             return image_features, attentions
-        else: 
-            if type(images) is list:
-                image_features = []
-                for image in images:
-                    image_forward_out = self.vision_tower(image.to(device=self.device, dtype=self.dtype).unsqueeze(0), output_hidden_states=True)
-                    image_feature = self.feature_select(image_forward_out).to(image.dtype)
-                    image_features.append(image_feature)
-            else:
-                image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype), output_hidden_states=True)
-                image_features = self.feature_select(image_forward_outs).to(images.dtype)
+        else:
             return image_features
 
     @property

@@ -69,6 +69,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         image_sizes: Optional[List[List[int]]] = None,
         return_dict: Optional[bool] = None,
         output_decoder_attentions: Optional[bool] = None,
+        with_decoder_grad: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
         if inputs_embeds is None:
@@ -88,7 +89,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 labels,
                 images,
                 image_sizes,
-                output_decoder_attentions
+                output_decoder_attentions,
+                with_decoder_grad
             )
 
         return super().forward(
