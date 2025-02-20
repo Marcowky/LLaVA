@@ -68,9 +68,11 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         images: Optional[torch.FloatTensor] = None,
         image_sizes: Optional[List[List[int]]] = None,
         return_dict: Optional[bool] = None,
-        output_decoder_attentions: Optional[bool] = None,
-        with_decoder_grad: Optional[bool] = None,
+        output_encoder_attentions: Optional[bool] = None,
+        with_encoder_grad: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
+
+        encoder_attentions = None
 
         if inputs_embeds is None:
             (
@@ -80,7 +82,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 past_key_values,
                 inputs_embeds,
                 labels, 
-                decoder_attentions
+                encoder_attentions
             ) = self.prepare_inputs_labels_for_multimodal(
                 input_ids,
                 position_ids,
@@ -89,11 +91,11 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 labels,
                 images,
                 image_sizes,
-                output_decoder_attentions,
-                with_decoder_grad
+                output_encoder_attentions,
+                with_encoder_grad
             )
-
-        return super().forward(
+        
+        output = super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -104,7 +106,11 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict
-        ), decoder_attentions
+        )
+        
+        output['encoder_attentions'] = encoder_attentions
+
+        return output
 
     @torch.no_grad()
     def generate(
@@ -126,6 +132,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 attention_mask,
                 _,
                 inputs_embeds,
+                _,
                 _
             ) = self.prepare_inputs_labels_for_multimodal(
                 inputs,

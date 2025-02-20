@@ -137,8 +137,8 @@ class LlavaMetaForCausalLM(ABC):
     def get_vision_tower(self):
         return self.get_model().get_vision_tower()
 
-    def encode_images(self, images, output_decoder_attentions=False, with_decoder_grad=False):
-        image_features, attentions = self.get_model().get_vision_tower()(images, output_decoder_attentions, with_decoder_grad)
+    def encode_images(self, images, output_encoder_attentions=False, with_encoder_grad=False):
+        image_features, attentions = self.get_model().get_vision_tower()(images, output_encoder_attentions, with_encoder_grad)
         image_features = self.get_model().mm_projector(image_features)
         return image_features, attentions
 
@@ -150,17 +150,20 @@ class LlavaMetaForCausalLM(ABC):
     
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels,
-        images, image_sizes=None, output_decoder_attentions=False, with_decoder_grad=False
+        images, image_sizes=None, output_encoder_attentions=False, with_encoder_grad=False
     ):
+
+        encoder_attentions = None
+
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
-            return input_ids, position_ids, attention_mask, past_key_values, None, labels
+            return input_ids, position_ids, attention_mask, past_key_values, None, labels, None
 
         if type(images) is list or images.ndim == 5:
             if type(images) is list:
                 images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
             concat_images = torch.cat([image for image in images], dim=0)
-            image_features, attentions = self.encode_images(concat_images, output_decoder_attentions, with_decoder_grad)
+            image_features, encoder_attentions = self.encode_images(concat_images, output_encoder_attentions, with_encoder_grad)
             split_sizes = [image.shape[0] for image in images]
             image_features = torch.split(image_features, split_sizes, dim=0)
             mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
@@ -205,7 +208,7 @@ class LlavaMetaForCausalLM(ABC):
             else:
                 raise ValueError(f"Unexpected mm_patch_merge_type: {self.config.mm_patch_merge_type}")
         else:
-            image_features, attentions = self.encode_images(images, output_decoder_attentions, with_decoder_grad)
+            image_features, encoder_attentions = self.encode_images(images, output_encoder_attentions, with_encoder_grad)
 
         # TODO: image start / end is not implemented here to support pretraining.
         if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(self.config, 'mm_use_im_start_end', False):
@@ -327,7 +330,7 @@ class LlavaMetaForCausalLM(ABC):
         if _position_ids is None:
             position_ids = None
 
-        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, attentions
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, encoder_attentions
 
     def initialize_vision_tokenizer(self, model_args, tokenizer):
         if model_args.mm_use_im_patch_token:

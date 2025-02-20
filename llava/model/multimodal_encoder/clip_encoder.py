@@ -43,15 +43,15 @@ class CLIPVisionTower(nn.Module):
         return image_features
 
     # 记录梯度
-    def forward(self, images, output_decoder_attentions=False, with_decoder_grad=False):
+    def forward(self, images, output_encoder_attentions=False, with_encoder_grad=False):
         # 选择是否禁用梯度计算
-        if not with_decoder_grad:
+        if not with_encoder_grad:
             with torch.no_grad():
-                return self._process_images(images, output_decoder_attentions)
+                return self._process_images(images, output_encoder_attentions)
         else:
-            return self._process_images(images, output_decoder_attentions)
+            return self._process_images(images, output_encoder_attentions)
 
-    def _process_images(self, images, output_decoder_attentions):
+    def _process_images(self, images, output_encoder_attentions):
         image_features = []
         attentions = []
 
@@ -59,16 +59,16 @@ class CLIPVisionTower(nn.Module):
         if isinstance(images, list):
             for image in images:
                 image_forward_out = self.vision_tower(image.to(device=self.device, dtype=self.dtype).unsqueeze(0),
-                                                    output_hidden_states=True, output_attentions=output_decoder_attentions)
+                                                    output_hidden_states=True, output_attentions=output_encoder_attentions)
                 image_feature = self.feature_select(image_forward_out).to(image.dtype)
                 image_features.append(image_feature)
-                if output_decoder_attentions:
+                if output_encoder_attentions:
                     attentions.append(image_forward_out.attentions)
         else:
             image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype),
-                                                output_hidden_states=True, output_attentions=output_decoder_attentions)
+                                                output_hidden_states=True, output_attentions=output_encoder_attentions)
             image_features = self.feature_select(image_forward_outs).to(images.dtype)
-            if output_decoder_attentions:
+            if output_encoder_attentions:
                 attentions = image_forward_outs.attentions
 
         return image_features, attentions
